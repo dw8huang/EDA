@@ -1,0 +1,307 @@
+---
+title: "Month Expense Analysis"
+author: "David"
+date: "2023-10-26"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(testthat)
+library(tidyverse)
+library(patchwork)
+library(ggplot2)
+library(ggalluvial)
+library(dplyr)
+library(stringr)
+library(ggthemes)
+eval <- TRUE
+knitr::opts_chunk$set(echo=TRUE, 
+                      cache=FALSE, 
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.width=6, 
+                      fig.height=4,
+                      fig.align='center', 
+                      eval=eval)
+```
+
+
+### Data Preprocessing
+```{r}
+data = read.csv('Oct_data.csv')
+head(data)
+
+# unique type
+unique(data$type)
+
+# there are some empty cells in `type` column
+data['type'][data['isTransportation']==1]
+
+# fill empty cell in `type` column by `isTransportation`
+data['type'][data['isTransportation']==1] = "Transportation"
+
+# check if there is empty cell in `type` column
+length(data['type'][data['type']==''])
+
+# drop `isTranspotation` and `Address`
+df = subset(data, select = -c(isTransportation, Address))
+
+# rename column
+names(df) = c('Date', 'Payee', 'Amount', 'Type')
+
+# convert char to date format
+df$Date <- as.Date(df$Date, format = "%d-%b-%y")
+
+# reorder rows ascending date
+df <- df[order(df$Date), ]
+
+# convert amount positive value
+df$Amount <- -df$Amount
+
+# unique type
+unique(df$Type)
+
+# create subcategory by dividing 'type' + captialize the first char of type
+df$Subtype = ifelse(grepl('outside', df$Type) | grepl('cook', df$Type), 
+                    ifelse(grepl('outside', df$Type), 'outside', 'cook'), 
+                    "None")
+df$Type = ifelse(grepl('food', df$Type), 'food', df$Type)
+df$Type = str_to_title(df$Type)
+df$Subtype = str_to_title(df$Subtype)
+
+# check the unique type
+unique(df$Type)
+
+# turn "Clothes, Shopping" into one type and one subtype
+df$Subtype = ifelse(grepl('Clothes', df$Type), 
+                    'Clothes',
+                    df$Subtype)
+df$Type = ifelse(grepl('Clothes', df$Type), 'Shopping', df$Type)
+
+head(df)
+```
+
+
+### Visualization
+```{r}
+
+# Date vs Amount
+
+# Bar Chart by Date
+ggplot(df, aes(Date, Amount)) + 
+  geom_col() +
+  labs(title = "Bar Chart of Daily Expenses") + 
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+
+```
+The bar chart looks like multimodal, meaning I spent significant amount of money on some dates. So, I draw a line to distinguish whether the amount is over $150
+```{r}
+bar +
+  geom_hline(yintercept = 150, linetype = "solid", color = "red", size = 1)
+
+```
+```{r}
+# group by date
+groupby_date <- df %>% 
+  group_by(Date) %>% 
+  summarise(Total_Amount = sum(Amount))
+
+# time series plot
+time_series <- ggplot(groupby_date, aes(x = Date, y = Total_Amount)) +
+  geom_line() +
+  geom_point() +
+  ggtitle("Time Series Analysis of Daily Transactions") +
+  xlab("Date") +
+  ylab("Total Amount Spent") +
+  theme_minimal()
+
+top_five_day <- groupby_date %>% 
+  arrange(desc(Total_Amount)) %>%
+  head(3)
+
+time_series + 
+  geom_point(data = top_five_day, aes(Date, Total_Amount), color = "deeppink") +
+  geom_text(data = top_five_day, aes(label = as.character(Date)), vjust = -1, hjust = 0.8, size = 3) + 
+  theme(text = element_text(family = "Arial Rounded MT Bold")) 
+```
+I will dive into these days to see what happened, including 9/26, 10/5, 10/23
+
+```{r}
+dates_to_filter <- as.Date(c("2023-09-26", "2023-10-05", "2023-10-23"))
+
+filtered_df <- df %>% 
+  filter(Date %in% dates_to_filter)
+
+plot <- ggplot(filtered_df, aes(Date, Amount, fill = Type)) + 
+  geom_col() +
+  labs(title = "Bar Chart of 3 days Exceeding Threshold") + 
+  theme(text = element_text(family = "Arial Rounded MT Bold"), axis.text.x = element_blank()) +
+  facet_wrap(~Date, scales = "free_x", ncol = 3)
+
+plot
+```
+in 9/26: the shopping accounts for great proportion of the bar
+in 10/5: essential and shopping 
+in 10/23: the entertainment accounts for significant part of the bar 
+
+```{r}
+# 2023/9/26
+filtered_df %>% 
+  filter(Date == "2023-09-26") %>% 
+  filter(Type == "Shopping")
+
+# 2023/10/5
+filtered_df %>% 
+  filter(Date == "2023-10-05") %>% 
+  filter(Type == "Shopping" | Type == "Essential")
+
+# 2023/10/23
+filtered_df %>% 
+  filter(Date == "2023-10-23") %>% 
+  filter(Type == "Entertainment")
+```
+for the 9/26, I bought a guitar which I would like to practice in leisure time and it could be sold upon graduation or I would keep it for a long time
+
+for 10/05, I bought a volleyball to either practice at home or bring it while hanging out with friend. The essential item is running shoes, which I have planned to buy it for running, and it's also a long term item.
+
+for 10/23, I bought an NBA ticket to fulfill my dream to watch NBA game. It's not a monthly expense, and I think it's worth spending to experience the feeling of professional basketball. 
+
+```{r}
+# We can also look data By Type
+total_amount <- df %>% 
+  group_by(Type) %>% 
+  summarise(Total = sum(Amount))
+
+ggplot() +
+  geom_col(data = df, aes(x = Type, y = Amount)) +
+  geom_text(data = total_amount, aes(x = Type, y = Total, label = Total),
+            position = position_stack(vjust = 0.5), size = 3, color = "grey", family = "Arial Rounded MT Bold") +
+  labs(title = "Bar Chart of Each Type") +
+  theme_minimal() +
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+# Bar Charts Type
+# ggplot(df, aes(x = Type, y = Amount)) + 
+#   geom_col() + 
+#   labs(title = "Bar Chart of Daily Expenses of Each Type") +
+#   theme(text = element_text(family = "Arial Rounded MT Bold"))
+
+```
+the food category has the most amount in this month expense. 
+
+```{r}
+# Bar Charts Faceted by Type
+ggplot(df, aes(x = Date, y = Amount)) +
+  geom_col() +
+  facet_wrap(~Type, scales = "fixed") +
+  theme_minimal() +
+  labs(title = "Bar Charts Faceted by Type",
+       x = "Date",
+       y = "Amount")+
+  coord_flip() +
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+
+
+```
+in the late September and late Octobor, the shopping and entertainment have the higher amount, and the detailed item has explained in the previous charts. 
+
+
+in the food type, there are two bars over $100 dollars in the mid-Oct. Let's look at what happened in those days. 
+
+```{r}
+df_food <- df %>% 
+  filter(Type == "Food") %>% 
+  group_by(Date) %>% 
+  summarise(Total_Amount = sum(Amount))
+  
+  
+ggplot(df_food, aes(x = Date, y = Total_Amount)) + 
+  geom_col()+ 
+  geom_hline(yintercept = 100, linetype = "solid", color = "red", size = 1) + 
+  labs(title = "Bar Chart with Type Food", x = "Category", y = "Total_Amount")
+
+# 2023-10-19 food expense
+df %>% 
+  filter(Type == "Food") %>% 
+  filter(Date == "2023-10-19")
+
+# 2023-10-20 food expense
+df %>% 
+  filter(Type == "Food") %>% 
+  filter(Date == "2023-10-20")
+```
+10/19: the expense on Oct.19 contain two large transactions, Shake Shack and Hmart, Both of them haven't split the amount with friends. As a result, the expense would be divied by 4. 
+
+10/20: the expense in Five Senses restaurant is $86.87, but actually I also haven't split the check with friends. So, the amount should be lower
+
+```{r}
+# By subtype
+
+# Sankey Diagram
+ggplot(data = df, aes(axis1 = Type, axis2 = fct_rev(Subtype), y = Amount)) +
+  geom_alluvium(aes(fill = Type))+
+  scale_x_discrete(limits = c("Type", "Subtype"), expand = c(.2, .05)) +
+  geom_stratum() +
+  geom_text(stat = "stratum", 
+            aes(label = after_stat(stratum)),
+            size = 3,
+            family = "Arial Rounded MT Bold") +
+  labs(title = "Sankey Diagram of Monthly Expenses",
+       subtitle = "Distribution of expenses by type and subtype") +
+  theme_minimal() +
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+```
+based on the plot, it looks approximately 1/4 of food expense is cook
+
+a little informative, maybe I need to add more subtype in the data to deepen understanding of the expense.
+```{r}
+# stack bar chart of the food
+summary_data <- df %>% 
+  filter(Subtype == "Outside" | Subtype == "Cook") %>% 
+  group_by(Subtype) %>% 
+  summarise(Total_Amount = sum(Amount))
+summary_data
+ggplot(summary_data, aes(x = "", y = Total_Amount, fill = Subtype)) +
+  geom_bar(stat = "identity", position = 'stack') +
+  scale_fill_manual(values = c("Cook" = "cadetblue4", "Outside" = "darkgoldenrod1")) +
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+  labs(
+    title = "Stacked Bar Plot of Total Amount by Subtype",
+    y = "Total Amount",
+    x = "Type Food",
+    fill = "Subtype"
+  )
+```
+```{r}
+# how many days I eat outside
+df %>% 
+  filter(Type == "Food") %>% 
+  ggplot(aes(x = Date, y = Amount)) +
+  geom_col() + 
+  labs(title = "Bar Chart of Daily Expenses of Food") +
+  geom_hline(yintercept = 100, linetype = "solid", color = "red", size = 1) + 
+  theme_minimal() +
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+  
+
+```
+17 days eat outside means i have 13 days cook by ourself. 
+Approximately, a person only spend $16.7 per day on meal, and I think it's really economical. 
+
+```{r}
+HighlightProportion = c(162.75/182.74,79/252.37,0,224.08/502.06,0)
+ggplot() +
+  geom_col(data = total_amount, aes(x = Type, y = Total)) +
+  geom_col(data = total_amount %>% mutate(HighlightAmount = Total * HighlightProportion), 
+           aes(x = Type, y = HighlightAmount), fill = "red", alpha = 0.5) +
+  # geom_text(data = total_amount, aes(x = Type, y = Total, label = Total),
+  #           position = position_stack(vjust = 0.5), size = 3, color = "grey", family = "Arial Rounded MT Bold") +
+  labs(title = "Bar Chart of Monthly Expenses of Each Type") +
+  theme_minimal() +
+  theme(text = element_text(family = "Arial Rounded MT Bold"))
+  
+
+```
+All in all, I think I could set my budget to $1500, especially after subtracting those long-term investment items, or one-time entertainment. 
